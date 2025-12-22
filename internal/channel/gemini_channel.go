@@ -183,7 +183,8 @@ func (ch *GeminiChannel) applyNativeFormatRedirect(req *http.Request, bodyBytes 
 			modelPart := parts[i+1]
 			originalModel := strings.Split(modelPart, ":")[0]
 
-			if targetModel, found := group.ModelRedirectMap[originalModel]; found {
+			if targets, found := group.ModelRedirectMap[originalModel]; found && len(targets) > 0 {
+				targetModel := selectModelByWeight(targets)
 				suffix := ""
 				if colonIndex := strings.Index(modelPart, ":"); colonIndex != -1 {
 					suffix = modelPart[colonIndex:]
@@ -285,25 +286,25 @@ func (ch *GeminiChannel) transformGeminiNativeFormat(req *http.Request, response
 }
 
 // buildConfiguredGeminiModels builds a list of models from redirect rules for Gemini format
-func buildConfiguredGeminiModels(redirectMap map[string]string) []any {
+func buildConfiguredGeminiModels(redirectMap map[string][]models.ModelRedirectTarget) []any {
 	if len(redirectMap) == 0 {
 		return []any{}
 	}
 
-	models := make([]any, 0, len(redirectMap))
+	result := make([]any, 0, len(redirectMap))
 	for sourceModel := range redirectMap {
 		modelName := sourceModel
 		if !strings.HasPrefix(sourceModel, "models/") {
 			modelName = "models/" + sourceModel
 		}
 
-		models = append(models, map[string]any{
+		result = append(result, map[string]any{
 			"name":                       modelName,
 			"displayName":                sourceModel,
 			"supportedGenerationMethods": []string{"generateContent"},
 		})
 	}
-	return models
+	return result
 }
 
 // mergeGeminiModelLists merges upstream and configured model lists for Gemini format

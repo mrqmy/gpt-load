@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"compress/gzip"
 	"encoding/json"
-	app_errors "gpt-load/internal/errors"
-	"gpt-load/internal/models"
 	"io"
 	"net/http"
+
+	app_errors "gpt-load/internal/errors"
+	"gpt-load/internal/jsonengine"
+	"gpt-load/internal/models"
 
 	"github.com/sirupsen/logrus"
 )
@@ -28,6 +30,21 @@ func (ps *ProxyServer) applyParamOverrides(bodyBytes []byte, group *models.Group
 	}
 
 	return json.Marshal(requestData)
+}
+
+// applyInboundRules applies JSON transformation rules to request body
+func (ps *ProxyServer) applyInboundRules(bodyBytes []byte, group *models.Group) ([]byte, error) {
+	if len(group.InboundRuleList) == 0 || len(bodyBytes) == 0 {
+		return bodyBytes, nil
+	}
+
+	engine := jsonengine.New(group.InboundRuleList)
+	result, err := io.ReadAll(engine.Process(bytes.NewReader(bodyBytes)))
+	if err != nil {
+		logrus.WithError(err).WithField("group_name", group.Name).Warn("Failed to apply inbound rules")
+		return bodyBytes, nil // 失败时返回原始数据
+	}
+	return result, nil
 }
 
 // logUpstreamError provides a centralized way to log errors from upstream interactions.

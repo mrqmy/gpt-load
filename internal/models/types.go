@@ -1,6 +1,7 @@
 package models
 
 import (
+	"gpt-load/internal/jsonengine"
 	"gpt-load/internal/types"
 	"time"
 
@@ -45,6 +46,12 @@ type HeaderRule struct {
 	Key    string `json:"key"`
 	Value  string `json:"value"`
 	Action string `json:"action"` // "set" or "remove"
+}
+
+// ModelRedirectTarget defines a single redirect target with weight.
+type ModelRedirectTarget struct {
+	Model  string `json:"model"`
+	Weight int    `json:"weight"`
 }
 
 // GroupSubGroup 聚合分组和子分组的关联表
@@ -97,6 +104,8 @@ type Group struct {
 	HeaderRules          datatypes.JSON       `gorm:"type:json" json:"header_rules"`
 	ModelRedirectRules   datatypes.JSONMap    `gorm:"type:json" json:"model_redirect_rules"`
 	ModelRedirectStrict  bool                 `gorm:"default:false" json:"model_redirect_strict"`
+	InboundRules         datatypes.JSON       `gorm:"type:json" json:"inbound_rules"`  // 入站规则（请求体）
+	OutboundRules        datatypes.JSON       `gorm:"type:json" json:"outbound_rules"` // 出站规则（响应体）
 	APIKeys              []APIKey             `gorm:"foreignKey:GroupID" json:"api_keys"`
 	SubGroups            []GroupSubGroup      `gorm:"-" json:"sub_groups,omitempty"`
 	LastValidatedAt      *time.Time           `json:"last_validated_at"`
@@ -104,9 +113,11 @@ type Group struct {
 	UpdatedAt            time.Time            `json:"updated_at"`
 
 	// For cache
-	ProxyKeysMap      map[string]struct{} `gorm:"-" json:"-"`
-	HeaderRuleList    []HeaderRule        `gorm:"-" json:"-"`
-	ModelRedirectMap  map[string]string   `gorm:"-" json:"-"`
+	ProxyKeysMap      map[string]struct{}  `gorm:"-" json:"-"`
+	HeaderRuleList    []HeaderRule         `gorm:"-" json:"-"`
+	ModelRedirectMap  map[string][]ModelRedirectTarget `gorm:"-" json:"-"`
+	InboundRuleList   []jsonengine.Rule    `gorm:"-" json:"-"` // 解析后的入站规则
+	OutboundRuleList  []jsonengine.Rule    `gorm:"-" json:"-"` // 解析后的出站规则
 }
 
 // APIKey 对应 api_keys 表

@@ -10,6 +10,7 @@ import (
 
 	app_errors "gpt-load/internal/errors"
 	"gpt-load/internal/i18n"
+	"gpt-load/internal/jsonengine"
 	"gpt-load/internal/models"
 	"gpt-load/internal/response"
 	"gpt-load/internal/services"
@@ -54,12 +55,14 @@ type GroupCreateRequest struct {
 	Sort                int                 `json:"sort"`
 	TestModel           string              `json:"test_model"`
 	ValidationEndpoint  string              `json:"validation_endpoint"`
-	ParamOverrides      map[string]any      `json:"param_overrides"`
-	ModelRedirectRules  map[string]string   `json:"model_redirect_rules"`
-	ModelRedirectStrict bool                `json:"model_redirect_strict"`
-	Config              map[string]any      `json:"config"`
-	HeaderRules         []models.HeaderRule `json:"header_rules"`
-	ProxyKeys           string              `json:"proxy_keys"`
+	ParamOverrides      map[string]any                        `json:"param_overrides"`
+	ModelRedirectRules  map[string][]models.ModelRedirectTarget `json:"model_redirect_rules"`
+	ModelRedirectStrict bool                                  `json:"model_redirect_strict"`
+	Config              map[string]any                        `json:"config"`
+	HeaderRules         []models.HeaderRule                   `json:"header_rules"`
+	InboundRules        []jsonengine.Rule                     `json:"inbound_rules"`
+	OutboundRules       []jsonengine.Rule                     `json:"outbound_rules"`
+	ProxyKeys           string                                `json:"proxy_keys"`
 }
 
 // CreateGroup handles the creation of a new group.
@@ -85,6 +88,8 @@ func (s *Server) CreateGroup(c *gin.Context) {
 		ModelRedirectStrict: req.ModelRedirectStrict,
 		Config:              req.Config,
 		HeaderRules:         req.HeaderRules,
+		InboundRules:        req.InboundRules,
+		OutboundRules:       req.OutboundRules,
 		ProxyKeys:           req.ProxyKeys,
 	}
 
@@ -123,12 +128,14 @@ type GroupUpdateRequest struct {
 	Sort                *int                `json:"sort"`
 	TestModel           string              `json:"test_model"`
 	ValidationEndpoint  *string             `json:"validation_endpoint,omitempty"`
-	ParamOverrides      map[string]any      `json:"param_overrides"`
-	ModelRedirectRules  map[string]string   `json:"model_redirect_rules"`
-	ModelRedirectStrict *bool               `json:"model_redirect_strict"`
-	Config              map[string]any      `json:"config"`
-	HeaderRules         []models.HeaderRule `json:"header_rules"`
-	ProxyKeys           *string             `json:"proxy_keys,omitempty"`
+	ParamOverrides      map[string]any                        `json:"param_overrides"`
+	ModelRedirectRules  map[string][]models.ModelRedirectTarget `json:"model_redirect_rules"`
+	ModelRedirectStrict *bool                                 `json:"model_redirect_strict"`
+	Config              map[string]any                        `json:"config"`
+	HeaderRules         []models.HeaderRule                   `json:"header_rules"`
+	InboundRules        []jsonengine.Rule                     `json:"inbound_rules"`
+	OutboundRules       []jsonengine.Rule                     `json:"outbound_rules"`
+	ProxyKeys           *string                               `json:"proxy_keys,omitempty"`
 }
 
 // UpdateGroup handles updating an existing group.
@@ -175,6 +182,16 @@ func (s *Server) UpdateGroup(c *gin.Context) {
 		params.HeaderRules = &rules
 	}
 
+	if req.InboundRules != nil {
+		rules := req.InboundRules
+		params.InboundRules = &rules
+	}
+
+	if req.OutboundRules != nil {
+		rules := req.OutboundRules
+		params.OutboundRules = &rules
+	}
+
 	group, err := s.GroupService.UpdateGroup(c.Request.Context(), uint(id), params)
 	if s.handleGroupError(c, err) {
 		return
@@ -201,7 +218,10 @@ type GroupResponse struct {
 	ModelRedirectStrict bool                `json:"model_redirect_strict"`
 	Config              datatypes.JSONMap   `json:"config"`
 	HeaderRules         []models.HeaderRule `json:"header_rules"`
+	InboundRules        []jsonengine.Rule   `json:"inbound_rules"`
+	OutboundRules       []jsonengine.Rule   `json:"outbound_rules"`
 	ProxyKeys           string              `json:"proxy_keys"`
+	SubGroupIds         []uint              `json:"sub_group_ids,omitempty"`
 	LastValidatedAt     *time.Time          `json:"last_validated_at"`
 	CreatedAt           time.Time           `json:"created_at"`
 	UpdatedAt           time.Time           `json:"updated_at"`
@@ -228,6 +248,33 @@ func (s *Server) newGroupResponse(group *models.Group) *GroupResponse {
 		}
 	}
 
+	// Parse inbound rules from JSON
+	var inboundRules []jsonengine.Rule
+	if len(group.InboundRules) > 0 {
+		if err := json.Unmarshal(group.InboundRules, &inboundRules); err != nil {
+			logrus.WithError(err).Error("Failed to unmarshal inbound rules")
+			inboundRules = make([]jsonengine.Rule, 0)
+		}
+	}
+
+	// Parse outbound rules from JSON
+	var outboundRules []jsonengine.Rule
+	if len(group.OutboundRules) > 0 {
+		if err := json.Unmarshal(group.OutboundRules, &outboundRules); err != nil {
+			logrus.WithError(err).Error("Failed to unmarshal outbound rules")
+			outboundRules = make([]jsonengine.Rule, 0)
+		}
+	}
+
+	// Extract sub-group IDs for aggregate groups
+	var subGroupIds []uint
+	if group.GroupType == "aggregate" && len(group.SubGroups) > 0 {
+		subGroupIds = make([]uint, 0, len(group.SubGroups))
+		for _, sg := range group.SubGroups {
+			subGroupIds = append(subGroupIds, sg.SubGroupID)
+		}
+	}
+
 	return &GroupResponse{
 		ID:                  group.ID,
 		Name:                group.Name,
@@ -245,7 +292,10 @@ func (s *Server) newGroupResponse(group *models.Group) *GroupResponse {
 		ModelRedirectStrict: group.ModelRedirectStrict,
 		Config:              group.Config,
 		HeaderRules:         headerRules,
+		InboundRules:        inboundRules,
+		OutboundRules:       outboundRules,
 		ProxyKeys:           group.ProxyKeys,
+		SubGroupIds:         subGroupIds,
 		LastValidatedAt:     group.LastValidatedAt,
 		CreatedAt:           group.CreatedAt,
 		UpdatedAt:           group.UpdatedAt,

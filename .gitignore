@@ -1,5 +1,6 @@
 # Binaries for programs and plugins
 *.exe
+*.bat
 *.exe~
 *.dll
 *.so
@@ -147,6 +148,7 @@ Thumbs.db
 # Local development
 local/
 dev/
+docs/
 
 # Test files
 test-results/

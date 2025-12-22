@@ -46,6 +46,25 @@ interface HeaderRuleItem {
   action: "set" | "remove";
 }
 
+// JSON操作规则类型
+interface JSONRuleItem {
+  key: string;
+  action: "set" | "add" | "remove";
+  value?: any;
+}
+
+// 模型重定向目标
+interface RedirectTarget {
+  model: string;
+  weight: number;
+}
+
+// 模型重定向规则
+interface RedirectRule {
+  sourceModel: string;
+  targets: RedirectTarget[];
+}
+
 const props = withDefaults(defineProps<Props>(), {
   group: null,
 });
@@ -56,10 +75,7 @@ const { t } = useI18n();
 const message = useMessage();
 const loading = ref(false);
 const formRef = ref();
-const modelRedirectTip = `{
-  "gpt-5": "gpt-5-2025-08-07",
-  "gemini-2.5-flash": "gemini-2.5-flash-preview-09-2025"
-}`;
+
 
 // 表单数据接口
 interface GroupFormData {
@@ -72,11 +88,13 @@ interface GroupFormData {
   test_model: string;
   validation_endpoint: string;
   param_overrides: string;
-  model_redirect_rules: string;
+  model_redirect_rules_list: RedirectRule[];
   model_redirect_strict: boolean;
   config: Record<string, number | string | boolean>;
   configItems: ConfigItem[];
   header_rules: HeaderRuleItem[];
+  inbound_rules: JSONRuleItem[];
+  outbound_rules: JSONRuleItem[];
   proxy_keys: string;
   group_type?: string;
 }
@@ -97,11 +115,13 @@ const formData = reactive<GroupFormData>({
   test_model: "",
   validation_endpoint: "",
   param_overrides: "",
-  model_redirect_rules: "",
+  model_redirect_rules_list: [] as RedirectRule[],
   model_redirect_strict: false,
   config: {},
   configItems: [] as ConfigItem[],
   header_rules: [] as HeaderRuleItem[],
+  inbound_rules: [] as JSONRuleItem[],
+  outbound_rules: [] as JSONRuleItem[],
   proxy_keys: "",
   group_type: "standard",
 });
@@ -292,11 +312,13 @@ function resetForm() {
     test_model: isCreateMode ? testModelPlaceholder.value : "",
     validation_endpoint: "",
     param_overrides: "",
-    model_redirect_rules: "",
+    model_redirect_rules_list: [],
     model_redirect_strict: false,
     config: {},
     configItems: [],
     header_rules: [],
+    inbound_rules: [],
+    outbound_rules: [],
     proxy_keys: "",
     group_type: "standard",
   });
@@ -334,7 +356,7 @@ function loadGroupData() {
     test_model: props.group.test_model || "",
     validation_endpoint: props.group.validation_endpoint || "",
     param_overrides: JSON.stringify(props.group.param_overrides || {}, null, 2),
-    model_redirect_rules: JSON.stringify(props.group.model_redirect_rules || {}, null, 2),
+    model_redirect_rules_list: parseRedirectRulesFromData(props.group.model_redirect_rules),
     model_redirect_strict: props.group.model_redirect_strict || false,
     config: {},
     configItems,
@@ -342,6 +364,16 @@ function loadGroupData() {
       key: rule.key || "",
       value: rule.value || "",
       action: (rule.action as "set" | "remove") || "set",
+    })),
+    inbound_rules: (props.group.inbound_rules || []).map((rule: JSONRuleItem) => ({
+      key: rule.key || "",
+      action: rule.action || "set",
+      value: rule.value,
+    })),
+    outbound_rules: (props.group.outbound_rules || []).map((rule: JSONRuleItem) => ({
+      key: rule.key || "",
+      action: rule.action || "set",
+      value: rule.value,
     })),
     proxy_keys: props.group.proxy_keys || "",
     group_type: props.group.group_type || "standard",
@@ -406,6 +438,123 @@ function addHeaderRule() {
 // 删除Header规则
 function removeHeaderRule(index: number) {
   formData.header_rules.splice(index, 1);
+}
+
+// 添加入站规则
+function addInboundRule() {
+  formData.inbound_rules.push({
+    key: "",
+    action: "set",
+    value: "",
+  });
+}
+
+// 删除入站规则
+function removeInboundRule(index: number) {
+  formData.inbound_rules.splice(index, 1);
+}
+
+// 添加出站规则
+function addOutboundRule() {
+  formData.outbound_rules.push({
+    key: "",
+    action: "set",
+    value: "",
+  });
+}
+
+// 删除出站规则
+function removeOutboundRule(index: number) {
+  formData.outbound_rules.splice(index, 1);
+}
+
+// 解析重定向规则数据为表单格式（兼容新旧格式）
+function parseRedirectRulesFromData(
+  rules: Record<string, unknown> | undefined
+): RedirectRule[] {
+  if (!rules || Object.keys(rules).length === 0) {
+    return [];
+  }
+  return Object.entries(rules).map(([sourceModel, value]) => {
+    // 新格式: 数组 [{ model, weight }]
+    if (Array.isArray(value)) {
+      return {
+        sourceModel,
+        targets: value.map((t: any) => ({
+          model: t.model || "",
+          weight: t.weight || 100,
+        })),
+      };
+    }
+    // 旧格式: 字符串
+    if (typeof value === "string") {
+      return {
+        sourceModel,
+        targets: [{ model: value, weight: 100 }],
+      };
+    }
+    // 其他情况返回空目标
+    return {
+      sourceModel,
+      targets: [{ model: "", weight: 100 }],
+    };
+  });
+}
+
+// 添加源模型规则
+function addRedirectRule() {
+  formData.model_redirect_rules_list.push({
+    sourceModel: "",
+    targets: [{ model: "", weight: 100 }],
+  });
+}
+
+// 删除源模型规则
+function removeRedirectRule(index: number) {
+  formData.model_redirect_rules_list.splice(index, 1);
+}
+
+// 添加重定向目标
+function addRedirectTarget(ruleIndex: number) {
+  formData.model_redirect_rules_list[ruleIndex].targets.push({
+    model: "",
+    weight: 100,
+  });
+}
+
+// 删除重定向目标
+function removeRedirectTarget(ruleIndex: number, targetIndex: number) {
+  const targets = formData.model_redirect_rules_list[ruleIndex].targets;
+  if (targets.length > 1) {
+    targets.splice(targetIndex, 1);
+  } else {
+    message.warning(t("keys.atLeastOneTarget"));
+  }
+}
+
+// 计算权重百分比
+function calculatePercent(targets: RedirectTarget[], index: number): string {
+  const total = targets.reduce((sum, t) => sum + (t.weight || 0), 0);
+  if (total === 0) return "0";
+  const percent = ((targets[index].weight || 0) / total) * 100;
+  return percent.toFixed(1);
+}
+
+// 将表单格式转换为提交格式
+function buildRedirectRulesForSubmit(): Record<string, Array<{ model: string; weight: number }>> {
+  const result: Record<string, Array<{ model: string; weight: number }>> = {};
+  for (const rule of formData.model_redirect_rules_list) {
+    if (rule.sourceModel.trim()) {
+      const validTargets = rule.targets.filter(t => t.model.trim() && t.weight > 0);
+      if (validTargets.length > 0) {
+        result[rule.sourceModel.trim()] = validTargets.map(t => ({
+          model: t.model.trim(),
+          weight: t.weight,
+        }));
+      }
+    }
+  }
+  return result;
 }
 
 // 规范化Header Key到Canonical格式（模拟HTTP标准）
@@ -474,28 +623,8 @@ async function handleSubmit() {
       }
     }
 
-    // 验证模型重定向规则 JSON 格式
-    let modelRedirectRules = {};
-    if (formData.model_redirect_rules) {
-      try {
-        modelRedirectRules = JSON.parse(formData.model_redirect_rules);
-
-        // Validate rule format
-        for (const [key, value] of Object.entries(modelRedirectRules)) {
-          if (typeof key !== "string" || typeof value !== "string") {
-            message.error(t("keys.modelRedirectInvalidFormat"));
-            return;
-          }
-          if (key.trim() === "" || (value as string).trim() === "") {
-            message.error(t("keys.modelRedirectEmptyModel"));
-            return;
-          }
-        }
-      } catch {
-        message.error(t("keys.modelRedirectInvalidJson"));
-        return;
-      }
-    }
+    // 构建模型重定向规则
+    const modelRedirectRules = buildRedirectRulesForSubmit();
 
     // 将configItems转换为config对象
     const config: Record<string, number | string | boolean> = {};
@@ -531,6 +660,20 @@ async function handleSubmit() {
           key: rule.key.trim(),
           value: rule.value,
           action: rule.action,
+        })),
+      inbound_rules: formData.inbound_rules
+        .filter((rule: JSONRuleItem) => rule.key.trim())
+        .map((rule: JSONRuleItem) => ({
+          key: rule.key.trim(),
+          action: rule.action,
+          value: rule.action === "remove" ? undefined : rule.value,
+        })),
+      outbound_rules: formData.outbound_rules
+        .filter((rule: JSONRuleItem) => rule.key.trim())
+        .map((rule: JSONRuleItem) => ({
+          key: rule.key.trim(),
+          action: rule.action,
+          value: rule.action === "remove" ? undefined : rule.value,
         })),
       proxy_keys: formData.proxy_keys,
     };
@@ -1075,6 +1218,158 @@ async function handleSubmit() {
                 </div>
               </div>
 
+              <!-- 入站规则（请求体JSON转换） -->
+              <div v-if="formData.group_type !== 'aggregate'" class="config-section">
+                <h5 class="config-title-with-tooltip">
+                  {{ t("keys.inboundRules") }}
+                  <n-tooltip trigger="hover" placement="top">
+                    <template #trigger>
+                      <n-icon :component="HelpCircleOutline" class="help-icon config-help" />
+                    </template>
+                    <div>
+                      {{ t("keys.inboundRulesTooltip") }}
+                    </div>
+                  </n-tooltip>
+                </h5>
+
+                <div class="json-rules-items">
+                  <n-form-item
+                    v-for="(rule, index) in formData.inbound_rules"
+                    :key="index"
+                    class="json-rule-row"
+                    :label="`${t('keys.rule')} ${index + 1}`"
+                  >
+                    <div class="json-rule-content">
+                      <div class="json-key">
+                        <n-input
+                          v-model:value="rule.key"
+                          :placeholder="t('keys.jsonKeyPlaceholder')"
+                        />
+                      </div>
+                      <div class="json-action">
+                        <n-select
+                          v-model:value="rule.action"
+                          :options="[
+                            { label: t('keys.actionSet'), value: 'set' },
+                            { label: t('keys.actionAdd'), value: 'add' },
+                            { label: t('keys.actionRemove'), value: 'remove' },
+                          ]"
+                          size="small"
+                          style="width: 100px"
+                        />
+                      </div>
+                      <div class="json-value" v-if="rule.action !== 'remove'">
+                        <n-input
+                          v-model:value="rule.value"
+                          :placeholder="t('keys.jsonValuePlaceholder')"
+                        />
+                      </div>
+                      <div class="json-value removed-placeholder" v-else>
+                        <span class="removed-text">{{ t("keys.willRemoveField") }}</span>
+                      </div>
+                      <div class="json-actions">
+                        <n-button
+                          @click="removeInboundRule(index)"
+                          type="error"
+                          quaternary
+                          circle
+                          size="small"
+                        >
+                          <template #icon>
+                            <n-icon :component="Remove" />
+                          </template>
+                        </n-button>
+                      </div>
+                    </div>
+                  </n-form-item>
+                </div>
+
+                <div style="margin-top: 12px; padding-left: 120px">
+                  <n-button @click="addInboundRule" dashed style="width: 100%">
+                    <template #icon>
+                      <n-icon :component="Add" />
+                    </template>
+                    {{ t("keys.addInboundRule") }}
+                  </n-button>
+                </div>
+              </div>
+
+              <!-- 出站规则（响应体JSON转换） -->
+              <div v-if="formData.group_type !== 'aggregate'" class="config-section">
+                <h5 class="config-title-with-tooltip">
+                  {{ t("keys.outboundRules") }}
+                  <n-tooltip trigger="hover" placement="top">
+                    <template #trigger>
+                      <n-icon :component="HelpCircleOutline" class="help-icon config-help" />
+                    </template>
+                    <div>
+                      {{ t("keys.outboundRulesTooltip") }}
+                    </div>
+                  </n-tooltip>
+                </h5>
+
+                <div class="json-rules-items">
+                  <n-form-item
+                    v-for="(rule, index) in formData.outbound_rules"
+                    :key="index"
+                    class="json-rule-row"
+                    :label="`${t('keys.rule')} ${index + 1}`"
+                  >
+                    <div class="json-rule-content">
+                      <div class="json-key">
+                        <n-input
+                          v-model:value="rule.key"
+                          :placeholder="t('keys.jsonKeyPlaceholder')"
+                        />
+                      </div>
+                      <div class="json-action">
+                        <n-select
+                          v-model:value="rule.action"
+                          :options="[
+                            { label: t('keys.actionSet'), value: 'set' },
+                            { label: t('keys.actionAdd'), value: 'add' },
+                            { label: t('keys.actionRemove'), value: 'remove' },
+                          ]"
+                          size="small"
+                          style="width: 100px"
+                        />
+                      </div>
+                      <div class="json-value" v-if="rule.action !== 'remove'">
+                        <n-input
+                          v-model:value="rule.value"
+                          :placeholder="t('keys.jsonValuePlaceholder')"
+                        />
+                      </div>
+                      <div class="json-value removed-placeholder" v-else>
+                        <span class="removed-text">{{ t("keys.willRemoveField") }}</span>
+                      </div>
+                      <div class="json-actions">
+                        <n-button
+                          @click="removeOutboundRule(index)"
+                          type="error"
+                          quaternary
+                          circle
+                          size="small"
+                        >
+                          <template #icon>
+                            <n-icon :component="Remove" />
+                          </template>
+                        </n-button>
+                      </div>
+                    </div>
+                  </n-form-item>
+                </div>
+
+                <div style="margin-top: 12px; padding-left: 120px">
+                  <n-button @click="addOutboundRule" dashed style="width: 100%">
+                    <template #icon>
+                      <n-icon :component="Add" />
+                    </template>
+                    {{ t("keys.addOutboundRule") }}
+                  </n-button>
+                </div>
+              </div>
+
               <!-- 模型重定向配置 -->
               <div v-if="formData.group_type !== 'aggregate'" class="config-section">
                 <n-form-item path="model_redirect_strict">
@@ -1111,30 +1406,107 @@ async function handleSubmit() {
                   </template>
                 </n-form-item>
 
-                <n-form-item path="model_redirect_rules">
-                  <template #label>
-                    <div class="form-label-with-tooltip">
-                      {{ t("keys.modelRedirectRules") }}
-                      <n-tooltip trigger="hover" placement="top">
-                        <template #trigger>
-                          <n-icon :component="HelpCircleOutline" class="help-icon config-help" />
-                        </template>
-                        {{ t("keys.modelRedirectRulesTooltip") }}
-                      </n-tooltip>
+                <div class="redirect-rules-section">
+                  <h5 class="config-title-with-tooltip">
+                    {{ t("keys.modelRedirectRules") }}
+                    <n-tooltip trigger="hover" placement="top">
+                      <template #trigger>
+                        <n-icon :component="HelpCircleOutline" class="help-icon config-help" />
+                      </template>
+                      {{ t("keys.modelRedirectRulesTooltip") }}
+                    </n-tooltip>
+                  </h5>
+
+                  <div class="redirect-rules-tree">
+                    <div
+                      v-for="(rule, ruleIndex) in formData.model_redirect_rules_list"
+                      :key="ruleIndex"
+                      class="redirect-rule-item"
+                    >
+                      <div class="redirect-source-row">
+                        <span class="tree-icon">📦</span>
+                        <n-input
+                          v-model:value="rule.sourceModel"
+                          :placeholder="t('keys.sourceModel')"
+                          class="source-model-input"
+                        />
+                        <n-button
+                          @click="removeRedirectRule(ruleIndex)"
+                          type="error"
+                          quaternary
+                          circle
+                          size="small"
+                        >
+                          <template #icon>
+                            <n-icon :component="Remove" />
+                          </template>
+                        </n-button>
+                      </div>
+
+                      <div class="redirect-targets">
+                        <div
+                          v-for="(target, targetIndex) in rule.targets"
+                          :key="targetIndex"
+                          class="redirect-target-row"
+                        >
+                          <span class="tree-branch">├─</span>
+                          <n-input
+                            v-model:value="target.model"
+                            :placeholder="t('keys.targetModel')"
+                            class="target-model-input"
+                          />
+                          <span class="weight-label">{{ t("keys.weight") }}:</span>
+                          <n-input-number
+                            v-model:value="target.weight"
+                            :min="1"
+                            :max="1000"
+                            class="target-weight-input"
+                          />
+                          <span class="weight-percent">
+                            ({{ calculatePercent(rule.targets, targetIndex) }}%)
+                          </span>
+                          <n-button
+                            @click="removeRedirectTarget(ruleIndex, targetIndex)"
+                            type="error"
+                            quaternary
+                            circle
+                            size="small"
+                            :disabled="rule.targets.length <= 1"
+                          >
+                            <template #icon>
+                              <n-icon :component="Remove" />
+                            </template>
+                          </n-button>
+                        </div>
+                        <div class="add-target-row">
+                          <span class="tree-branch">└─</span>
+                          <n-button
+                            @click="addRedirectTarget(ruleIndex)"
+                            dashed
+                            size="small"
+                            class="add-target-btn"
+                          >
+                            <template #icon>
+                              <n-icon :component="Add" />
+                            </template>
+                            {{ t("keys.addTarget") }}
+                          </n-button>
+                        </div>
+                      </div>
                     </div>
-                  </template>
-                  <n-input
-                    v-model:value="formData.model_redirect_rules"
-                    type="textarea"
-                    :placeholder="modelRedirectTip"
-                    :rows="4"
-                  />
-                  <template #feedback>
-                    <div style="font-size: 14px; color: #999">
-                      {{ t("keys.modelRedirectRulesDescription") }}
-                    </div>
-                  </template>
-                </n-form-item>
+                  </div>
+
+                  <n-button
+                    @click="addRedirectRule"
+                    dashed
+                    style="width: 100%; margin-top: 12px"
+                  >
+                    <template #icon>
+                      <n-icon :component="Add" />
+                    </template>
+                    {{ t("keys.addSourceModel") }}
+                  </n-button>
+                </div>
               </div>
 
               <div class="config-section">
@@ -1556,6 +1928,168 @@ async function handleSubmit() {
 
   .header-actions {
     justify-content: flex-end;
+  }
+}
+
+/* JSON规则样式 */
+.json-rules-items {
+  margin-bottom: 12px;
+}
+
+.json-rule-row {
+  margin-bottom: 12px;
+}
+
+.json-rule-content {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  width: 100%;
+}
+
+.json-key {
+  flex: 0 0 200px;
+}
+
+.json-action {
+  flex: 0 0 100px;
+}
+
+.json-value {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  min-height: 34px;
+}
+
+.json-value.removed-placeholder {
+  justify-content: center;
+  background-color: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 0 12px;
+}
+
+.json-actions {
+  flex: 0 0 32px;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  height: 34px;
+}
+
+@media (max-width: 768px) {
+  .json-rule-content {
+    flex-direction: column;
+    gap: 8px;
+    align-items: stretch;
+  }
+
+  .json-key,
+  .json-action,
+  .json-value {
+    flex: 1;
+  }
+
+  .json-actions {
+    justify-content: flex-end;
+  }
+}
+
+/* 模型重定向树形样式 */
+.redirect-rules-section {
+  margin-top: 16px;
+}
+
+.redirect-rules-tree {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.redirect-rule-item {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.redirect-source-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.tree-icon {
+  font-size: 16px;
+  flex-shrink: 0;
+}
+
+.source-model-input {
+  flex: 1;
+  max-width: 300px;
+}
+
+.redirect-targets {
+  margin-left: 24px;
+}
+
+.redirect-target-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.tree-branch {
+  color: var(--text-tertiary);
+  font-family: monospace;
+  flex-shrink: 0;
+  width: 20px;
+}
+
+.target-model-input {
+  flex: 1;
+  max-width: 250px;
+}
+
+.target-weight-input {
+  width: 100px;
+}
+
+.weight-percent {
+  color: var(--text-tertiary);
+  font-size: 12px;
+  min-width: 50px;
+}
+
+.add-target-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.add-target-btn {
+  flex: 1;
+  max-width: 150px;
+}
+
+@media (max-width: 768px) {
+  .redirect-source-row,
+  .redirect-target-row {
+    flex-wrap: wrap;
+  }
+
+  .source-model-input,
+  .target-model-input {
+    max-width: 100%;
+    flex-basis: 100%;
+  }
+
+  .redirect-targets {
+    margin-left: 12px;
   }
 }
 </style>

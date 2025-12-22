@@ -33,18 +33,99 @@ const showGroupModal = ref(false);
 // 存储分组项 DOM 元素的引用
 const groupItemRefs = ref(new Map());
 const showAggregateGroupModal = ref(false);
+// 跟踪哪些聚合分组是展开的
+const expandedGroups = ref<Set<number>>(new Set());
 
-const filteredGroups = computed(() => {
-  if (!searchText.value.trim()) {
-    return props.groups;
-  }
+// 获取所有作为子分组的组ID
+const subGroupIds = computed(() => {
+  const ids = new Set<number>();
+  props.groups.forEach(group => {
+    if (group.group_type === "aggregate" && group.sub_group_ids) {
+      group.sub_group_ids.forEach(id => ids.add(id));
+    }
+  });
+  return ids;
+});
+
+// 构建分组ID到分组对象的映射
+const groupMap = computed(() => {
+  const map = new Map<number, Group>();
+  props.groups.forEach(group => {
+    if (group.id) map.set(group.id, group);
+  });
+  return map;
+});
+
+// 构建树形结构：过滤掉子分组，只在根级别显示独立分组和聚合分组
+const groupTree = computed(() => {
   const search = searchText.value.toLowerCase().trim();
-  return props.groups.filter(
-    group =>
+  
+  // 过滤函数
+  const matchesSearch = (group: Group) => {
+    if (!search) return true;
+    return (
       group.name.toLowerCase().includes(search) ||
       group.display_name?.toLowerCase().includes(search)
-  );
+    );
+  };
+
+  // 如果有搜索词，显示所有匹配的组（平铺显示便于搜索）
+  if (search) {
+    return props.groups.filter(matchesSearch).map(group => ({
+      ...group,
+      isSubGroup: subGroupIds.value.has(group.id!),
+      children: [] as (Group & { weight?: number })[],
+    }));
+  }
+
+  // 无搜索时，构建树形结构
+  return props.groups
+    .filter(group => !subGroupIds.value.has(group.id!)) // 过滤掉子分组
+    .map(group => {
+      // 根据 sub_group_ids 构建子分组列表
+      let children: (Group & { weight?: number })[] = [];
+      if (group.group_type === "aggregate" && group.sub_group_ids && group.sub_group_ids.length > 0) {
+        children = group.sub_group_ids
+          .map(id => groupMap.value.get(id))
+          .filter((g): g is Group => g !== undefined)
+          .map(g => ({ ...g, weight: 0 })); // weight 暂时设为 0，后续可从 sub_groups 获取
+        
+        // 如果有 sub_groups 数据，获取权重信息
+        if (group.sub_groups && group.sub_groups.length > 0) {
+          const weightMap = new Map<number, number>();
+          group.sub_groups.forEach(sg => {
+            if (sg.group?.id) weightMap.set(sg.group.id, sg.weight);
+          });
+          children = children.map(c => ({
+            ...c,
+            weight: c.id ? (weightMap.get(c.id) ?? 0) : 0,
+          }));
+        }
+      }
+      
+      return {
+        ...group,
+        isSubGroup: false,
+        children,
+      };
+    });
 });
+
+// 切换聚合分组的展开/折叠状态
+function toggleExpand(groupId: number) {
+  if (expandedGroups.value.has(groupId)) {
+    expandedGroups.value.delete(groupId);
+  } else {
+    expandedGroups.value.add(groupId);
+  }
+}
+
+// 检查聚合分组是否展开
+function isExpanded(groupId: number) {
+  return expandedGroups.value.has(groupId);
+}
+
+
 
 // 监听选中项 ID 的变化，并自动滚动到该项
 watch(
@@ -68,8 +149,16 @@ watch(
   }
 );
 
-function handleGroupClick(group: Group) {
+function handleGroupClick(group: Group & { children?: unknown[] }) {
   emit("group-select", group);
+  // 点击聚合分组时自动展开/折叠
+  if (group.group_type === "aggregate" && group.id) {
+    const hasChildren = group.children && group.children.length > 0;
+    const hasSubGroupIds = group.sub_group_ids && group.sub_group_ids.length > 0;
+    if (hasChildren || hasSubGroupIds) {
+      toggleExpand(group.id);
+    }
+  }
 }
 
 // 获取渠道类型的标签颜色
@@ -123,50 +212,94 @@ function handleGroupCreated(group: Group) {
       <!-- 分组列表 -->
       <div class="groups-section">
         <n-spin :show="loading" size="small">
-          <div v-if="filteredGroups.length === 0 && !loading" class="empty-container">
+          <div v-if="groupTree.length === 0 && !loading" class="empty-container">
             <n-empty
               size="small"
               :description="searchText ? t('keys.noMatchingGroups') : t('keys.noGroups')"
             />
           </div>
           <div v-else class="groups-list">
-            <div
-              v-for="group in filteredGroups"
-              :key="group.id"
-              class="group-item"
-              :class="{
-                active: selectedGroup?.id === group.id,
-                aggregate: group.group_type === 'aggregate',
-              }"
-              @click="handleGroupClick(group)"
-              :ref="
-                el => {
-                  if (el) groupItemRefs.set(group.id, el);
-                }
-              "
-            >
-              <div class="group-icon">
-                <span v-if="group.group_type === 'aggregate'">🔗</span>
-                <span v-else-if="group.channel_type === 'openai'">🤖</span>
-                <span v-else-if="group.channel_type === 'gemini'">💎</span>
-                <span v-else-if="group.channel_type === 'anthropic'">🧠</span>
-                <span v-else>🔧</span>
-              </div>
-              <div class="group-content">
-                <div class="group-name">{{ getGroupDisplayName(group) }}</div>
-                <div class="group-meta">
-                  <n-tag size="tiny" :type="getChannelTagType(group.channel_type)">
-                    {{ group.channel_type }}
-                  </n-tag>
-                  <n-tag v-if="group.group_type === 'aggregate'" size="tiny" type="warning" round>
-                    {{ t("keys.aggregateGroup") }}
-                  </n-tag>
-                  <span v-if="group.group_type !== 'aggregate'" class="group-id">
-                    #{{ group.name }}
-                  </span>
+            <template v-for="group in groupTree" :key="group.id">
+              <!-- 主分组项 -->
+              <div
+                class="group-item"
+                :class="{
+                  active: selectedGroup?.id === group.id,
+                  aggregate: group.group_type === 'aggregate',
+                  'has-children': group.children && group.children.length > 0,
+                  'is-sub-group': group.isSubGroup,
+                }"
+                @click="handleGroupClick(group)"
+                :ref="el => { if (el) groupItemRefs.set(group.id, el); }"
+              >
+                <!-- 展开/折叠按钮 -->
+                <div
+                  v-if="group.group_type === 'aggregate' && group.children && group.children.length > 0"
+                  class="expand-btn"
+                  @click.stop="toggleExpand(group.id!)"
+                >
+                  <span :class="{ rotated: isExpanded(group.id!) }">▶</span>
+                </div>
+                <div v-else class="expand-placeholder"></div>
+                
+                <div class="group-icon">
+                  <span v-if="group.group_type === 'aggregate'">🔗</span>
+                  <span v-else-if="group.channel_type === 'openai'">🤖</span>
+                  <span v-else-if="group.channel_type === 'gemini'">💎</span>
+                  <span v-else-if="group.channel_type === 'anthropic'">🧠</span>
+                  <span v-else>🔧</span>
+                </div>
+                <div class="group-content">
+                  <div class="group-name">{{ getGroupDisplayName(group) }}</div>
+                  <div class="group-meta">
+                    <n-tag size="tiny" :type="getChannelTagType(group.channel_type)">
+                      {{ group.channel_type }}
+                    </n-tag>
+                    <n-tag v-if="group.group_type === 'aggregate'" size="tiny" type="warning" round>
+                      {{ t("keys.aggregateGroup") }}
+                    </n-tag>
+                    <span v-if="group.isSubGroup" class="sub-group-badge">
+                      ↳ {{ t("keys.subGroup") }}
+                    </span>
+                    <span v-else-if="group.group_type !== 'aggregate'" class="group-id">
+                      #{{ group.name }}
+                    </span>
+                  </div>
                 </div>
               </div>
-            </div>
+              
+              <!-- 子分组列表 -->
+              <div
+                v-if="group.children && group.children.length > 0 && isExpanded(group.id!)"
+                class="sub-groups"
+              >
+                <div
+                  v-for="child in group.children"
+                  :key="child.id"
+                  class="group-item sub-group-item"
+                  :class="{ active: selectedGroup?.id === child.id }"
+                  @click="handleGroupClick(child)"
+                  :ref="el => { if (el) groupItemRefs.set(child.id, el); }"
+                >
+                  <div class="tree-line"></div>
+                  <div class="group-icon small">
+                    <span v-if="child.channel_type === 'openai'">🤖</span>
+                    <span v-else-if="child.channel_type === 'gemini'">💎</span>
+                    <span v-else-if="child.channel_type === 'anthropic'">🧠</span>
+                    <span v-else>🔧</span>
+                  </div>
+                  <div class="group-content">
+                    <div class="group-name">{{ getGroupDisplayName(child) }}</div>
+                    <div class="group-meta">
+                      <n-tag size="tiny" :type="getChannelTagType(child.channel_type)">
+                        {{ child.channel_type }}
+                      </n-tag>
+                      <span class="weight-badge">{{ child.weight }}%</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </template>
           </div>
         </n-spin>
       </div>
@@ -259,6 +392,84 @@ function handleGroupCreated(group: Group) {
   background: transparent;
   box-sizing: border-box;
   position: relative;
+}
+
+/* 展开/折叠按钮 */
+.expand-btn {
+  width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: transform 0.2s ease;
+  flex-shrink: 0;
+}
+
+.expand-btn:hover {
+  color: var(--primary-color);
+}
+
+.expand-btn span {
+  display: inline-block;
+  transition: transform 0.2s ease;
+}
+
+.expand-btn span.rotated {
+  transform: rotate(90deg);
+}
+
+.expand-placeholder {
+  width: 16px;
+  flex-shrink: 0;
+}
+
+/* 子分组容器 */
+.sub-groups {
+  margin-left: 8px;
+  padding-left: 8px;
+  border-left: 1px dashed var(--border-color);
+}
+
+/* 子分组项 */
+.sub-group-item {
+  padding: 6px 8px;
+  margin-left: 8px;
+}
+
+.sub-group-item .group-icon.small {
+  width: 22px;
+  height: 22px;
+  font-size: 12px;
+}
+
+.tree-line {
+  display: none;
+}
+
+/* 权重徽章 */
+.weight-badge {
+  font-size: 10px;
+  padding: 1px 6px;
+  background: var(--primary-color);
+  color: white;
+  border-radius: 10px;
+  font-weight: 500;
+}
+
+/* 子分组标识 */
+.sub-group-badge {
+  font-size: 10px;
+  color: var(--text-secondary);
+  opacity: 0.8;
+}
+
+.group-item.is-sub-group {
+  opacity: 0.7;
+  margin-left: 16px;
+  border-style: dotted;
 }
 
 /* 聚合分组样式 */

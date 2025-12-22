@@ -16,6 +16,7 @@ import (
 	"gpt-load/internal/config"
 	"gpt-load/internal/encryption"
 	app_errors "gpt-load/internal/errors"
+	"gpt-load/internal/jsonengine"
 	"gpt-load/internal/models"
 	"gpt-load/internal/utils"
 
@@ -94,10 +95,12 @@ type GroupCreateParams struct {
 	TestModel           string
 	ValidationEndpoint  string
 	ParamOverrides      map[string]any
-	ModelRedirectRules  map[string]string
+	ModelRedirectRules  map[string][]models.ModelRedirectTarget
 	ModelRedirectStrict bool
 	Config              map[string]any
 	HeaderRules         []models.HeaderRule
+	InboundRules        []jsonengine.Rule
+	OutboundRules       []jsonengine.Rule
 	ProxyKeys           string
 	SubGroups           []SubGroupInput
 }
@@ -116,10 +119,12 @@ type GroupUpdateParams struct {
 	HasTestModel        bool
 	ValidationEndpoint  *string
 	ParamOverrides      map[string]any
-	ModelRedirectRules  map[string]string
+	ModelRedirectRules  map[string][]models.ModelRedirectTarget
 	ModelRedirectStrict *bool
 	Config              map[string]any
 	HeaderRules         *[]models.HeaderRule
+	InboundRules        *[]jsonengine.Rule
+	OutboundRules       *[]jsonengine.Rule
 	ProxyKeys           *string
 	SubGroups           *[]SubGroupInput
 }
@@ -214,6 +219,22 @@ func (s *GroupService) CreateGroup(ctx context.Context, params GroupCreateParams
 		headerRulesJSON = datatypes.JSON("[]")
 	}
 
+	inboundRulesJSON, err := s.normalizeJSONRules(params.InboundRules)
+	if err != nil {
+		return nil, err
+	}
+	if inboundRulesJSON == nil {
+		inboundRulesJSON = datatypes.JSON("[]")
+	}
+
+	outboundRulesJSON, err := s.normalizeJSONRules(params.OutboundRules)
+	if err != nil {
+		return nil, err
+	}
+	if outboundRulesJSON == nil {
+		outboundRulesJSON = datatypes.JSON("[]")
+	}
+
 	// Validate model redirect rules for aggregate groups
 	if groupType == "aggregate" && len(params.ModelRedirectRules) > 0 {
 		return nil, NewI18nError(app_errors.ErrValidation, "validation.aggregate_no_model_redirect", nil)
@@ -239,6 +260,8 @@ func (s *GroupService) CreateGroup(ctx context.Context, params GroupCreateParams
 		ModelRedirectStrict: params.ModelRedirectStrict,
 		Config:              cleanedConfig,
 		HeaderRules:         headerRulesJSON,
+		InboundRules:        inboundRulesJSON,
+		OutboundRules:       outboundRulesJSON,
 		ProxyKeys:           strings.TrimSpace(params.ProxyKeys),
 	}
 
@@ -263,11 +286,38 @@ func (s *GroupService) CreateGroup(ctx context.Context, params GroupCreateParams
 	return &group, nil
 }
 
-// ListGroups returns all groups without sub-group relations.
+// ListGroups returns all groups with sub-group IDs for aggregate groups.
 func (s *GroupService) ListGroups(ctx context.Context) ([]models.Group, error) {
 	var groups []models.Group
 	if err := s.db.WithContext(ctx).Order("sort asc, id desc").Find(&groups).Error; err != nil {
 		return nil, app_errors.ParseDBError(err)
+	}
+
+	// Load sub-group IDs for aggregate groups
+	var aggregateGroupIds []uint
+	for i := range groups {
+		if groups[i].GroupType == "aggregate" {
+			aggregateGroupIds = append(aggregateGroupIds, groups[i].ID)
+		}
+	}
+
+	if len(aggregateGroupIds) > 0 {
+		var subGroupRelations []models.GroupSubGroup
+		if err := s.db.WithContext(ctx).Where("group_id IN ?", aggregateGroupIds).Find(&subGroupRelations).Error; err != nil {
+			logrus.WithContext(ctx).WithError(err).Error("failed to load sub-group relations")
+		} else {
+			// Build a map of group_id -> []sub_group_id
+			subGroupMap := make(map[uint][]models.GroupSubGroup)
+			for _, rel := range subGroupRelations {
+				subGroupMap[rel.GroupID] = append(subGroupMap[rel.GroupID], rel)
+			}
+			// Assign to groups
+			for i := range groups {
+				if rels, ok := subGroupMap[groups[i].ID]; ok {
+					groups[i].SubGroups = rels
+				}
+			}
+		}
 	}
 
 	return groups, nil
@@ -409,6 +459,28 @@ func (s *GroupService) UpdateGroup(ctx context.Context, id uint, params GroupUpd
 			headerRulesJSON = datatypes.JSON("[]")
 		}
 		group.HeaderRules = headerRulesJSON
+	}
+
+	if params.InboundRules != nil {
+		inboundRulesJSON, err := s.normalizeJSONRules(*params.InboundRules)
+		if err != nil {
+			return nil, err
+		}
+		if inboundRulesJSON == nil {
+			inboundRulesJSON = datatypes.JSON("[]")
+		}
+		group.InboundRules = inboundRulesJSON
+	}
+
+	if params.OutboundRules != nil {
+		outboundRulesJSON, err := s.normalizeJSONRules(*params.OutboundRules)
+		if err != nil {
+			return nil, err
+		}
+		if outboundRulesJSON == nil {
+			outboundRulesJSON = datatypes.JSON("[]")
+		}
+		group.OutboundRules = outboundRulesJSON
 	}
 
 	if err := tx.Save(&group).Error; err != nil {
@@ -860,6 +932,39 @@ func (s *GroupService) normalizeHeaderRules(rules []models.HeaderRule) (datatype
 	return datatypes.JSON(headerRulesBytes), nil
 }
 
+// normalizeJSONRules validates and normalizes JSON transformation rules.
+func (s *GroupService) normalizeJSONRules(rules []jsonengine.Rule) (datatypes.JSON, error) {
+	if len(rules) == 0 {
+		return nil, nil
+	}
+
+	normalized := make([]jsonengine.Rule, 0, len(rules))
+	seenKeys := make(map[string]bool)
+
+	for _, rule := range rules {
+		if !rule.IsValid() {
+			continue
+		}
+		key := strings.TrimSpace(rule.Key)
+		if seenKeys[key] {
+			return nil, NewI18nError(app_errors.ErrValidation, "validation.duplicate_json_rule", map[string]any{"key": key})
+		}
+		seenKeys[key] = true
+		normalized = append(normalized, jsonengine.Rule{Key: key, Action: rule.Action, Value: rule.Value})
+	}
+
+	if len(normalized) == 0 {
+		return nil, nil
+	}
+
+	rulesBytes, err := json.Marshal(normalized)
+	if err != nil {
+		return nil, NewI18nError(app_errors.ErrInternalServer, "error.process_json_rules", map[string]any{"error": err.Error()})
+	}
+
+	return datatypes.JSON(rulesBytes), nil
+}
+
 // validateAndCleanUpstreams validates upstream definitions.
 func (s *GroupService) validateAndCleanUpstreams(upstreams json.RawMessage) (datatypes.JSON, error) {
 	if len(upstreams) == 0 {
@@ -978,28 +1083,47 @@ func (s *GroupService) isValidChannelType(channelType string) bool {
 	return false
 }
 
-// convertToJSONMap converts a map[string]string to datatypes.JSONMap
-func convertToJSONMap(input map[string]string) datatypes.JSONMap {
+// convertToJSONMap converts a map[string][]models.ModelRedirectTarget to datatypes.JSONMap
+func convertToJSONMap(input map[string][]models.ModelRedirectTarget) datatypes.JSONMap {
 	if len(input) == 0 {
 		return datatypes.JSONMap{}
 	}
 
 	result := make(datatypes.JSONMap)
-	for k, v := range input {
-		result[k] = v
+	for k, targets := range input {
+		// Convert []ModelRedirectTarget to []map[string]any for JSON storage
+		targetList := make([]map[string]any, len(targets))
+		for i, t := range targets {
+			targetList[i] = map[string]any{
+				"model":  t.Model,
+				"weight": t.Weight,
+			}
+		}
+		result[k] = targetList
 	}
 	return result
 }
 
 // validateModelRedirectRules validates the format and content of model redirect rules
-func validateModelRedirectRules(rules map[string]string) error {
+func validateModelRedirectRules(rules map[string][]models.ModelRedirectTarget) error {
 	if len(rules) == 0 {
 		return nil
 	}
 
-	for key, value := range rules {
-		if strings.TrimSpace(key) == "" || strings.TrimSpace(value) == "" {
-			return fmt.Errorf("model name cannot be empty")
+	for sourceModel, targets := range rules {
+		if strings.TrimSpace(sourceModel) == "" {
+			return fmt.Errorf("source model name cannot be empty")
+		}
+		if len(targets) == 0 {
+			return fmt.Errorf("at least one target model is required for source model: %s", sourceModel)
+		}
+		for _, target := range targets {
+			if strings.TrimSpace(target.Model) == "" {
+				return fmt.Errorf("target model name cannot be empty for source model: %s", sourceModel)
+			}
+			if target.Weight < 0 {
+				return fmt.Errorf("weight cannot be negative for source model: %s", sourceModel)
+			}
 		}
 	}
 

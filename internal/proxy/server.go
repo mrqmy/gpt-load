@@ -108,6 +108,13 @@ func (ps *ProxyServer) HandleProxy(c *gin.Context) {
 		return
 	}
 
+	// Apply inbound rules (request body transformation)
+	finalBodyBytes, err = ps.applyInboundRules(finalBodyBytes, group)
+	if err != nil {
+		response.Error(c, app_errors.NewAPIError(app_errors.ErrInternalServer, fmt.Sprintf("Failed to apply inbound rules: %v", err)))
+		return
+	}
+
 	isStream := channelHandler.IsStreamRequest(c, bodyBytes)
 
 	ps.executeRequestWithRetry(c, channelHandler, originalGroup, group, finalBodyBytes, isStream, startTime, 0)
@@ -164,6 +171,11 @@ func (ps *ProxyServer) executeRequestWithRetry(
 	req.Header.Del("Authorization")
 	req.Header.Del("X-Api-Key")
 	req.Header.Del("X-Goog-Api-Key")
+
+	// Disable compression when outbound rules are configured (to avoid decompression overhead)
+	if len(group.OutboundRuleList) > 0 {
+		req.Header.Del("Accept-Encoding")
+	}
 
 	// Apply model redirection
 	finalBodyBytes, err := channelHandler.ApplyModelRedirect(req, bodyBytes, group)
@@ -274,9 +286,9 @@ func (ps *ProxyServer) executeRequestWithRetry(
 		c.Status(resp.StatusCode)
 
 		if isStream {
-			ps.handleStreamingResponse(c, resp)
+			ps.handleStreamingResponse(c, resp, group)
 		} else {
-			ps.handleNormalResponse(c, resp)
+			ps.handleNormalResponse(c, resp, group)
 		}
 	}
 

@@ -7,6 +7,7 @@ import (
 	"gpt-load/internal/models"
 	"gpt-load/internal/types"
 	"gpt-load/internal/utils"
+	"math/rand"
 	"net/http"
 	"net/url"
 	"reflect"
@@ -131,7 +132,7 @@ func (b *BaseChannel) GetStreamClient() *http.Client {
 	return b.StreamClient
 }
 
-// ApplyModelRedirect applies model redirection based on the group's redirect rules.
+// ApplyModelRedirect applies model redirection based on the group's redirect rules with weight support.
 func (b *BaseChannel) ApplyModelRedirect(req *http.Request, bodyBytes []byte, group *models.Group) ([]byte, error) {
 	if len(group.ModelRedirectMap) == 0 || len(bodyBytes) == 0 {
 		return bodyBytes, nil
@@ -152,8 +153,10 @@ func (b *BaseChannel) ApplyModelRedirect(req *http.Request, bodyBytes []byte, gr
 		return bodyBytes, nil
 	}
 
-	// Direct match without any prefix processing
-	if targetModel, found := group.ModelRedirectMap[model]; found {
+	// Find redirect targets for this model
+	if targets, found := group.ModelRedirectMap[model]; found && len(targets) > 0 {
+		// Select target by weight
+		targetModel := selectModelByWeight(targets)
 		requestData["model"] = targetModel
 
 		// Log the redirection for audit
@@ -172,6 +175,30 @@ func (b *BaseChannel) ApplyModelRedirect(req *http.Request, bodyBytes []byte, gr
 	}
 
 	return bodyBytes, nil
+}
+
+// selectModelByWeight selects a model from targets based on weight using weighted random selection.
+func selectModelByWeight(targets []models.ModelRedirectTarget) string {
+	if len(targets) == 1 {
+		return targets[0].Model
+	}
+
+	// Calculate total weight
+	totalWeight := 0
+	for _, t := range targets {
+		totalWeight += t.Weight
+	}
+
+	// Random selection
+	r := rand.Intn(totalWeight)
+	for _, t := range targets {
+		r -= t.Weight
+		if r < 0 {
+			return t.Model
+		}
+	}
+
+	return targets[0].Model
 }
 
 // TransformModelList transforms the model list response based on redirect rules.
@@ -224,21 +251,21 @@ func (b *BaseChannel) TransformModelList(req *http.Request, bodyBytes []byte, gr
 }
 
 // buildConfiguredModels builds a list of models from redirect rules
-func buildConfiguredModels(redirectMap map[string]string) []any {
+func buildConfiguredModels(redirectMap map[string][]models.ModelRedirectTarget) []any {
 	if len(redirectMap) == 0 {
 		return []any{}
 	}
 
-	models := make([]any, 0, len(redirectMap))
+	result := make([]any, 0, len(redirectMap))
 	for sourceModel := range redirectMap {
-		models = append(models, map[string]any{
+		result = append(result, map[string]any{
 			"id":       sourceModel,
 			"object":   "model",
 			"created":  0,
 			"owned_by": "system",
 		})
 	}
-	return models
+	return result
 }
 
 // mergeModelLists merges upstream and configured model lists

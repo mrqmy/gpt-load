@@ -352,6 +352,20 @@ export default {
     removeToggleTooltip:
       "削除スイッチを有効にするとこのヘッダーを削除、無効にするとこのヘッダーを追加または上書き",
     addHeader: "ヘッダー追加",
+    // JSONルール
+    inboundRules: "インバウンドルール（リクエストボディ）",
+    inboundRulesTooltip: "アップストリームに転送する前にリクエストボディJSONを変換。フィールドの追加、変更、削除操作をサポート",
+    outboundRules: "アウトバウンドルール（レスポンスボディ）",
+    outboundRulesTooltip: "クライアントに返す前にレスポンスボディJSONを変換。フィールドの追加、変更、削除操作をサポート",
+    rule: "ルール",
+    jsonKeyPlaceholder: "JSONパス、例：model または data.field",
+    jsonValuePlaceholder: "値（JSON形式）",
+    actionSet: "変更",
+    actionAdd: "追加",
+    actionRemove: "削除",
+    willRemoveField: "このフィールドは削除されます",
+    addInboundRule: "インバウンドルール追加",
+    addOutboundRule: "アウトバウンドルール追加",
     paramOverridesTooltip:
       "JSON形式を使用して、上書きするAPIリクエストパラメータを定義します。これらのパラメータは、リクエスト送信時に元のパラメータにマージされます。",
     modelRedirectPolicy: "未設定モデルポリシー",

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"gpt-load/internal/config"
+	"gpt-load/internal/jsonengine"
 	"gpt-load/internal/models"
 	"gpt-load/internal/store"
 	"gpt-load/internal/syncer"
@@ -82,25 +83,60 @@ func (gm *GroupManager) Initialize() error {
 				g.HeaderRuleList = []models.HeaderRule{}
 			}
 
-			// Parse model redirect rules with error handling
-			g.ModelRedirectMap = make(map[string]string)
+			// Parse inbound rules (request body transformation)
+			if len(group.InboundRules) > 0 {
+				if err := json.Unmarshal(group.InboundRules, &g.InboundRuleList); err != nil {
+					logrus.WithError(err).WithField("group_name", g.Name).Warn("Failed to parse inbound rules for group")
+					g.InboundRuleList = []jsonengine.Rule{}
+				}
+			} else {
+				g.InboundRuleList = []jsonengine.Rule{}
+			}
+
+			// Parse outbound rules (response body transformation)
+			if len(group.OutboundRules) > 0 {
+				if err := json.Unmarshal(group.OutboundRules, &g.OutboundRuleList); err != nil {
+					logrus.WithError(err).WithField("group_name", g.Name).Warn("Failed to parse outbound rules for group")
+					g.OutboundRuleList = []jsonengine.Rule{}
+				}
+			} else {
+				g.OutboundRuleList = []jsonengine.Rule{}
+			}
+
+			// Parse model redirect rules with weight support
+			g.ModelRedirectMap = make(map[string][]models.ModelRedirectTarget)
 			if len(group.ModelRedirectRules) > 0 {
 				hasInvalidRules := false
 				for key, value := range group.ModelRedirectRules {
-					if valueStr, ok := value.(string); ok {
-						g.ModelRedirectMap[key] = valueStr
+					// value should be []any, each element is map[string]any with "model" and "weight"
+					if targets, ok := value.([]any); ok {
+						var redirectTargets []models.ModelRedirectTarget
+						for _, t := range targets {
+							if targetMap, ok := t.(map[string]any); ok {
+								model, modelOk := targetMap["model"].(string)
+								weight, weightOk := targetMap["weight"].(float64) // JSON numbers are float64
+								if modelOk && weightOk && weight > 0 {
+									redirectTargets = append(redirectTargets, models.ModelRedirectTarget{
+										Model:  model,
+										Weight: int(weight),
+									})
+								}
+							}
+						}
+						if len(redirectTargets) > 0 {
+							g.ModelRedirectMap[key] = redirectTargets
+						}
 					} else {
 						logrus.WithFields(logrus.Fields{
 							"group_name": g.Name,
 							"rule_key":   key,
 							"value_type": fmt.Sprintf("%T", value),
-							"value":      value,
-						}).Error("Invalid model redirect rule value type, skipping this rule")
+						}).Error("Invalid model redirect rule format, expected array of targets")
 						hasInvalidRules = true
 					}
 				}
 				if hasInvalidRules {
-					logrus.WithField("group_name", g.Name).Warn("Group has invalid model redirect rules, some rules were skipped. Please check the configuration.")
+					logrus.WithField("group_name", g.Name).Warn("Group has invalid model redirect rules, some rules were skipped")
 				}
 			}
 
@@ -119,12 +155,14 @@ func (gm *GroupManager) Initialize() error {
 
 			groupMap[g.Name] = &g
 			logrus.WithFields(logrus.Fields{
-				"group_name":               g.Name,
-				"effective_config":         g.EffectiveConfig,
-				"header_rules_count":       len(g.HeaderRuleList),
+				"group_name":                 g.Name,
+				"effective_config":           g.EffectiveConfig,
+				"header_rules_count":         len(g.HeaderRuleList),
+				"inbound_rules_count":        len(g.InboundRuleList),
+				"outbound_rules_count":       len(g.OutboundRuleList),
 				"model_redirect_rules_count": len(g.ModelRedirectMap),
-				"model_redirect_strict":    g.ModelRedirectStrict,
-				"sub_group_count":          len(g.SubGroups),
+				"model_redirect_strict":      g.ModelRedirectStrict,
+				"sub_group_count":            len(g.SubGroups),
 			}).Debug("Loaded group with effective config")
 		}
 

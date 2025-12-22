@@ -39,6 +39,19 @@ export interface HeaderRule {
   action: "set" | "remove";
 }
 
+// 模型重定向目标（带权重）
+export interface ModelRedirectTarget {
+  model: string;
+  weight: number;
+}
+
+// JSON操作规则（请求体/响应体转换）
+export interface JSONRule {
+  key: string;
+  action: "set" | "add" | "remove";
+  value?: unknown;
+}
+
 // 子分组配置（创建/更新时使用）
 export interface SubGroupConfig {
   group_id: number;
@@ -76,9 +89,11 @@ export interface Group {
   api_keys?: APIKey[];
   endpoint?: string;
   param_overrides: Record<string, unknown>;
-  model_redirect_rules: Record<string, string>;
+  model_redirect_rules: Record<string, ModelRedirectTarget[]>;
   model_redirect_strict: boolean;
   header_rules?: HeaderRule[];
+  inbound_rules?: JSONRule[];
+  outbound_rules?: JSONRule[];
   proxy_keys: string;
   group_type?: GroupType;
   sub_groups?: SubGroupInfo[]; // 子分组列表（仅聚合分组）
