@@ -346,7 +346,7 @@ export default {
     outboundRules: "出站规则（响应体转换）",
     outboundRulesTooltip: "在响应返回客户端前，对响应体JSON进行修改。支持添加、修改、删除字段操作",
     rule: "规则",
-    jsonKeyPlaceholder: "JSON路径，如 model 或 data.field",
+    jsonPathPlaceholder: "路径，如：user.name 或 items[0].price 或 users[*].email",
     jsonValuePlaceholder: "值（JSON格式）",
     actionSet: "修改",
     actionAdd: "添加",

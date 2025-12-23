@@ -119,9 +119,9 @@ func (f *Factory) newBaseChannel(name string, group *models.Group) (*BaseChannel
 		ResponseHeaderTimeout: time.Duration(group.EffectiveConfig.ResponseHeaderTimeout) * time.Second,
 		ProxyURL:              group.EffectiveConfig.ProxyURL,
 		DisableCompression:    false,
-		WriteBufferSize:       512 * 1024,
-		ReadBufferSize:        512 * 1024,
-		ForceAttemptHTTP2:     true,
+		WriteBufferSize:       2 * 1024 * 1024,  // 2MB
+		ReadBufferSize:        2 * 1024 * 1024,  // 2MB
+		ForceAttemptHTTP2:     false,  // ⚡ 禁用HTTP/2，尝试解决流控问题
 		TLSHandshakeTimeout:   15 * time.Second,
 		ExpectContinueTimeout: 1 * time.Second,
 	}

@@ -99,8 +99,8 @@ type GroupCreateParams struct {
 	ModelRedirectStrict bool
 	Config              map[string]any
 	HeaderRules         []models.HeaderRule
-	InboundRules        []jsonengine.Rule
-	OutboundRules       []jsonengine.Rule
+	InboundRules        []jsonengine.PathRule
+	OutboundRules       []jsonengine.PathRule
 	ProxyKeys           string
 	SubGroups           []SubGroupInput
 }
@@ -123,8 +123,8 @@ type GroupUpdateParams struct {
 	ModelRedirectStrict *bool
 	Config              map[string]any
 	HeaderRules         *[]models.HeaderRule
-	InboundRules        *[]jsonengine.Rule
-	OutboundRules       *[]jsonengine.Rule
+	InboundRules        *[]jsonengine.PathRule
+	OutboundRules       *[]jsonengine.PathRule
 	ProxyKeys           *string
 	SubGroups           *[]SubGroupInput
 }
@@ -423,7 +423,17 @@ func (s *GroupService) UpdateGroup(ctx context.Context, id uint, params GroupUpd
 		if err := validateModelRedirectRules(params.ModelRedirectRules); err != nil {
 			return nil, NewI18nError(app_errors.ErrValidation, "validation.invalid_model_redirect", map[string]any{"error": err.Error()})
 		}
-		group.ModelRedirectRules = convertToJSONMap(params.ModelRedirectRules)
+		converted := convertToJSONMap(params.ModelRedirectRules)
+		group.ModelRedirectRules = converted
+
+		// ⚡ 验证转换后的数据
+		logrus.WithFields(logrus.Fields{
+			"group_id":            group.ID,
+			"group_name":          group.Name,
+			"params_rules":        params.ModelRedirectRules,
+			"converted_rules":     converted,
+			"converted_rules_len": len(converted),
+		}).Debug("UpdateGroup: Converting ModelRedirectRules")
 	}
 
 	if params.ModelRedirectStrict != nil {
@@ -489,6 +499,18 @@ func (s *GroupService) UpdateGroup(ctx context.Context, id uint, params GroupUpd
 
 	if err := tx.Commit().Error; err != nil {
 		return nil, app_errors.ErrDatabase
+	}
+
+	// ⚡ 验证数据库中实际存储的内容
+	var savedGroup models.Group
+	if err := s.db.WithContext(ctx).First(&savedGroup, id).Error; err == nil {
+		logrus.WithFields(logrus.Fields{
+			"group_id":                    savedGroup.ID,
+			"group_name":                  savedGroup.Name,
+			"saved_redirect_rules":        savedGroup.ModelRedirectRules,
+			"saved_redirect_rules_len":    len(savedGroup.ModelRedirectRules),
+			"saved_redirect_rules_type":   fmt.Sprintf("%T", savedGroup.ModelRedirectRules),
+		}).Debug("UpdateGroup: Verified data in database")
 	}
 
 	if err := s.groupManager.Invalidate(); err != nil {
@@ -933,24 +955,25 @@ func (s *GroupService) normalizeHeaderRules(rules []models.HeaderRule) (datatype
 }
 
 // normalizeJSONRules validates and normalizes JSON transformation rules.
-func (s *GroupService) normalizeJSONRules(rules []jsonengine.Rule) (datatypes.JSON, error) {
+func (s *GroupService) normalizeJSONRules(rules []jsonengine.PathRule) (datatypes.JSON, error) {
 	if len(rules) == 0 {
 		return nil, nil
 	}
 
-	normalized := make([]jsonengine.Rule, 0, len(rules))
-	seenKeys := make(map[string]bool)
+	normalized := make([]jsonengine.PathRule, 0, len(rules))
+	seenPaths := make(map[string]bool)
 
 	for _, rule := range rules {
-		if !rule.IsValid() {
+		// PathRule 有效性检查：Path 非空
+		if rule.Path == "" {
 			continue
 		}
-		key := strings.TrimSpace(rule.Key)
-		if seenKeys[key] {
-			return nil, NewI18nError(app_errors.ErrValidation, "validation.duplicate_json_rule", map[string]any{"key": key})
+		path := strings.TrimSpace(rule.Path)
+		if seenPaths[path] {
+			return nil, NewI18nError(app_errors.ErrValidation, "validation.duplicate_json_rule", map[string]any{"key": path})
 		}
-		seenKeys[key] = true
-		normalized = append(normalized, jsonengine.Rule{Key: key, Action: rule.Action, Value: rule.Value})
+		seenPaths[path] = true
+		normalized = append(normalized, jsonengine.PathRule{Path: path, Action: rule.Action, Value: rule.Value, ValueBytes: rule.ValueBytes})
 	}
 
 	if len(normalized) == 0 {

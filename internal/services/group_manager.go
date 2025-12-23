@@ -87,46 +87,149 @@ func (gm *GroupManager) Initialize() error {
 			if len(group.InboundRules) > 0 {
 				if err := json.Unmarshal(group.InboundRules, &g.InboundRuleList); err != nil {
 					logrus.WithError(err).WithField("group_name", g.Name).Warn("Failed to parse inbound rules for group")
-					g.InboundRuleList = []jsonengine.Rule{}
+					g.InboundRuleList = []jsonengine.PathRule{}
 				}
 			} else {
-				g.InboundRuleList = []jsonengine.Rule{}
+				g.InboundRuleList = []jsonengine.PathRule{}
 			}
 
 			// Parse outbound rules (response body transformation)
 			if len(group.OutboundRules) > 0 {
 				if err := json.Unmarshal(group.OutboundRules, &g.OutboundRuleList); err != nil {
 					logrus.WithError(err).WithField("group_name", g.Name).Warn("Failed to parse outbound rules for group")
-					g.OutboundRuleList = []jsonengine.Rule{}
+					g.OutboundRuleList = []jsonengine.PathRule{}
 				}
 			} else {
-				g.OutboundRuleList = []jsonengine.Rule{}
+				g.OutboundRuleList = []jsonengine.PathRule{}
 			}
 
 			// Parse model redirect rules with weight support
 			g.ModelRedirectMap = make(map[string][]models.ModelRedirectTarget)
+
 			if len(group.ModelRedirectRules) > 0 {
 				hasInvalidRules := false
 				for key, value := range group.ModelRedirectRules {
-					// value should be []any, each element is map[string]any with "model" and "weight"
-					if targets, ok := value.([]any); ok {
-						var redirectTargets []models.ModelRedirectTarget
-						for _, t := range targets {
-							if targetMap, ok := t.(map[string]any); ok {
-								model, modelOk := targetMap["model"].(string)
-								weight, weightOk := targetMap["weight"].(float64) // JSON numbers are float64
-								if modelOk && weightOk && weight > 0 {
-									redirectTargets = append(redirectTargets, models.ModelRedirectTarget{
-										Model:  model,
-										Weight: int(weight),
-									})
+					var redirectTargets []models.ModelRedirectTarget
+
+					// 尝试多种可能的类型格式
+					// 某些情况下 GORM 可能直接返回 []map[string]interface{} 而不是 []interface{}
+					switch v := value.(type) {
+					case []interface{}:
+						// 标准 JSON 反序列化格式
+						for _, t := range v {
+							targetMap, ok := t.(map[string]interface{})
+							if !ok {
+								continue
+							}
+
+							// 提取 model
+							var model string
+							if m, ok := targetMap["model"]; ok {
+								if ms, ok := m.(string); ok {
+									model = ms
+								} else {
+									continue
 								}
+							} else {
+								continue
+							}
+
+							// 提取 weight，支持多种数字类型（包括 json.Number）
+							var weight int
+							if w, ok := targetMap["weight"]; ok {
+								switch v := w.(type) {
+								case json.Number:
+									// GORM 使用 json.Number 来避免精度损失
+									if i64, err := v.Int64(); err == nil {
+										weight = int(i64)
+									} else if f64, err := v.Float64(); err == nil {
+										weight = int(f64)
+									} else {
+										continue
+									}
+								case float64:
+									weight = int(v)
+								case float32:
+									weight = int(v)
+								case int:
+									weight = v
+								case int64:
+									weight = int(v)
+								case int32:
+									weight = int(v)
+								default:
+									continue
+								}
+							} else {
+								continue
+							}
+
+							if weight > 0 && model != "" {
+								redirectTargets = append(redirectTargets, models.ModelRedirectTarget{
+									Model:  model,
+									Weight: weight,
+								})
 							}
 						}
 						if len(redirectTargets) > 0 {
 							g.ModelRedirectMap[key] = redirectTargets
 						}
-					} else {
+					case []map[string]interface{}:
+						// GORM 直接返回 map 数组的格式
+						for _, targetMap := range v {
+							// 提取 model
+							var model string
+							if m, ok := targetMap["model"]; ok {
+								if ms, ok := m.(string); ok {
+									model = ms
+								} else {
+									continue
+								}
+							} else {
+								continue
+							}
+
+							// 提取 weight，支持多种数字类型（包括 json.Number）
+							var weight int
+							if w, ok := targetMap["weight"]; ok {
+								switch v := w.(type) {
+								case json.Number:
+									// GORM 使用 json.Number 来避免精度损失
+									if i64, err := v.Int64(); err == nil {
+										weight = int(i64)
+									} else if f64, err := v.Float64(); err == nil {
+										weight = int(f64)
+									} else {
+										continue
+									}
+								case float64:
+									weight = int(v)
+								case float32:
+									weight = int(v)
+								case int:
+									weight = v
+								case int64:
+									weight = int(v)
+								case int32:
+									weight = int(v)
+								default:
+									continue
+								}
+							} else {
+								continue
+							}
+
+							if weight > 0 && model != "" {
+								redirectTargets = append(redirectTargets, models.ModelRedirectTarget{
+									Model:  model,
+									Weight: weight,
+								})
+							}
+						}
+						if len(redirectTargets) > 0 {
+							g.ModelRedirectMap[key] = redirectTargets
+						}
+					default:
 						logrus.WithFields(logrus.Fields{
 							"group_name": g.Name,
 							"rule_key":   key,

@@ -48,7 +48,7 @@ interface HeaderRuleItem {
 
 // JSON操作规则类型
 interface JSONRuleItem {
-  key: string;
+  path: string;
   action: "set" | "add" | "remove";
   value?: any;
 }
@@ -366,12 +366,12 @@ function loadGroupData() {
       action: (rule.action as "set" | "remove") || "set",
     })),
     inbound_rules: (props.group.inbound_rules || []).map((rule: JSONRuleItem) => ({
-      key: rule.key || "",
+      path: rule.path || "",
       action: rule.action || "set",
       value: rule.value,
     })),
     outbound_rules: (props.group.outbound_rules || []).map((rule: JSONRuleItem) => ({
-      key: rule.key || "",
+      path: rule.path || "",
       action: rule.action || "set",
       value: rule.value,
     })),
@@ -443,7 +443,7 @@ function removeHeaderRule(index: number) {
 // 添加入站规则
 function addInboundRule() {
   formData.inbound_rules.push({
-    key: "",
+    path: "",
     action: "set",
     value: "",
   });
@@ -457,7 +457,7 @@ function removeInboundRule(index: number) {
 // 添加出站规则
 function addOutboundRule() {
   formData.outbound_rules.push({
-    key: "",
+    path: "",
     action: "set",
     value: "",
   });
@@ -662,16 +662,16 @@ async function handleSubmit() {
           action: rule.action,
         })),
       inbound_rules: formData.inbound_rules
-        .filter((rule: JSONRuleItem) => rule.key.trim())
+        .filter((rule: JSONRuleItem) => rule.path.trim())
         .map((rule: JSONRuleItem) => ({
-          key: rule.key.trim(),
+          path: rule.path.trim(),
           action: rule.action,
           value: rule.action === "remove" ? undefined : rule.value,
         })),
       outbound_rules: formData.outbound_rules
-        .filter((rule: JSONRuleItem) => rule.key.trim())
+        .filter((rule: JSONRuleItem) => rule.path.trim())
         .map((rule: JSONRuleItem) => ({
-          key: rule.key.trim(),
+          path: rule.path.trim(),
           action: rule.action,
           value: rule.action === "remove" ? undefined : rule.value,
         })),
@@ -1242,8 +1242,8 @@ async function handleSubmit() {
                     <div class="json-rule-content">
                       <div class="json-key">
                         <n-input
-                          v-model:value="rule.key"
-                          :placeholder="t('keys.jsonKeyPlaceholder')"
+                          v-model:value="rule.path"
+                          :placeholder="t('keys.jsonPathPlaceholder')"
                         />
                       </div>
                       <div class="json-action">
@@ -1318,8 +1318,8 @@ async function handleSubmit() {
                     <div class="json-rule-content">
                       <div class="json-key">
                         <n-input
-                          v-model:value="rule.key"
-                          :placeholder="t('keys.jsonKeyPlaceholder')"
+                          v-model:value="rule.path"
+                          :placeholder="t('keys.jsonPathPlaceholder')"
                         />
                       </div>
                       <div class="json-action">

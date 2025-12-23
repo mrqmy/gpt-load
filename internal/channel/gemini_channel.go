@@ -162,7 +162,17 @@ func (ch *GeminiChannel) ValidateKey(ctx context.Context, apiKey *models.APIKey,
 
 // ApplyModelRedirect overrides the default implementation for Gemini channel.
 func (ch *GeminiChannel) ApplyModelRedirect(req *http.Request, bodyBytes []byte, group *models.Group) ([]byte, error) {
+	// ⚡ 调试日志：显示重定向规则加载情况
+	logrus.WithFields(logrus.Fields{
+		"group":                group.Name,
+		"path":                 req.URL.Path,
+		"redirect_map_count":   len(group.ModelRedirectMap),
+		"redirect_map_keys":    getMapKeys(group.ModelRedirectMap),
+		"redirect_strict":      group.ModelRedirectStrict,
+	}).Debug("ApplyModelRedirect called")
+
 	if len(group.ModelRedirectMap) == 0 {
+		logrus.WithField("group", group.Name).Debug("No redirect rules configured, skipping")
 		return bodyBytes, nil
 	}
 
@@ -182,6 +192,16 @@ func (ch *GeminiChannel) applyNativeFormatRedirect(req *http.Request, bodyBytes 
 		if part == "models" && i+1 < len(parts) {
 			modelPart := parts[i+1]
 			originalModel := strings.Split(modelPart, ":")[0]
+
+			// ⚡ 调试日志：显示提取的模型和可用的重定向规则
+			logrus.WithFields(logrus.Fields{
+				"group":                group.Name,
+				"extracted_model":      originalModel,
+				"model_part":           modelPart,
+				"path":                 path,
+				"redirect_rules_keys":  getMapKeys(group.ModelRedirectMap),
+				"redirect_rules_count": len(group.ModelRedirectMap),
+			}).Debug("Model redirect lookup")
 
 			if targets, found := group.ModelRedirectMap[originalModel]; found && len(targets) > 0 {
 				targetModel := selectModelByWeight(targets)
@@ -212,6 +232,15 @@ func (ch *GeminiChannel) applyNativeFormatRedirect(req *http.Request, bodyBytes 
 	}
 
 	return bodyBytes, nil
+}
+
+// getMapKeys returns all keys from a map (for debugging)
+func getMapKeys(m map[string][]models.ModelRedirectTarget) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
 }
 
 // TransformModelList transforms the model list response based on redirect rules.

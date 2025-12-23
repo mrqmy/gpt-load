@@ -358,7 +358,7 @@ export default {
     outboundRules: "アウトバウンドルール（レスポンスボディ）",
     outboundRulesTooltip: "クライアントに返す前にレスポンスボディJSONを変換。フィールドの追加、変更、削除操作をサポート",
     rule: "ルール",
-    jsonKeyPlaceholder: "JSONパス、例：model または data.field",
+    jsonPathPlaceholder: "パス、例：user.name または items[0].price または users[*].email",
     jsonValuePlaceholder: "値（JSON形式）",
     actionSet: "変更",
     actionAdd: "追加",

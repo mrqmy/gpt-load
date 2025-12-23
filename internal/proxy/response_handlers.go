@@ -4,7 +4,6 @@ import (
 	"io"
 	"net/http"
 	"strings"
-	"time"
 
 	"gpt-load/internal/jsonengine"
 	"gpt-load/internal/models"
@@ -49,30 +48,26 @@ func (ps *ProxyServer) handleStreamingResponse(c *gin.Context, resp *http.Respon
 }
 
 func (ps *ProxyServer) handleNormalResponse(c *gin.Context, resp *http.Response, group *models.Group) {
-	start := time.Now()
-	
 	// 检查是否有出站规则且响应是 JSON
 	if len(group.OutboundRuleList) > 0 {
 		contentType := resp.Header.Get("Content-Type")
 		if strings.Contains(contentType, "json") {
-			engine := jsonengine.New(group.OutboundRuleList)
-			if err := engine.ProcessTo(resp.Body, c.Writer); err != nil {
-				logUpstreamError("jsonengine processing", err)
+			engine, err := jsonengine.NewPathEngine(group.OutboundRuleList)
+			if err != nil {
+				logUpstreamError("creating path engine", err)
+			} else {
+				if err := engine.Process(resp.Body, c.Writer); err != nil {
+					logUpstreamError("jsonengine processing", err)
+				}
+				return
 			}
-			logrus.WithField("duration", time.Since(start)).Debug("jsonengine processing completed")
-			return
 		}
 	}
 
 	// 无规则或非 JSON，使用大缓冲区直接透传
 	buf := make([]byte, 1024*1024) // 1MB buffer
-	total, err := io.CopyBuffer(c.Writer, resp.Body, buf)
+	_, err := io.CopyBuffer(c.Writer, resp.Body, buf)
 	if err != nil {
 		logUpstreamError("copying response body", err)
 	}
-	
-	logrus.WithFields(logrus.Fields{
-		"bytes":    total,
-		"duration": time.Since(start),
-	}).Debug("io.Copy completed")
 }

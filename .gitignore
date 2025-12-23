@@ -216,3 +216,7 @@ run-local.sh
 start-local.sh
 dev-setup.sh
 data/
+
+# Claude Code files
+.claude/
+1.md

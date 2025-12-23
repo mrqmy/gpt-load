@@ -47,7 +47,7 @@ export interface ModelRedirectTarget {
 
 // JSON操作规则（请求体/响应体转换）
 export interface JSONRule {
-  key: string;
+  path: string;  // 路径支持嵌套（如 "user.email" 或 "candidates.[*].content"）
   action: "set" | "add" | "remove";
   value?: unknown;
 }

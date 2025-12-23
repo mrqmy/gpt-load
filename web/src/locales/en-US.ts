@@ -359,7 +359,7 @@ export default {
     outboundRules: "Outbound Rules (Response Body)",
     outboundRulesTooltip: "Transform response body JSON before returning to client. Supports add, modify, and remove field operations",
     rule: "Rule",
-    jsonKeyPlaceholder: "JSON path, e.g. model or data.field",
+    jsonPathPlaceholder: "Path, e.g.: user.name or items[0].price or users[*].email",
     jsonValuePlaceholder: "Value (JSON format)",
     actionSet: "Modify",
     actionAdd: "Add",

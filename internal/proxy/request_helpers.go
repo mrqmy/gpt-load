@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"time"
 
 	app_errors "gpt-load/internal/errors"
 	"gpt-load/internal/jsonengine"
@@ -38,13 +39,44 @@ func (ps *ProxyServer) applyInboundRules(bodyBytes []byte, group *models.Group) 
 		return bodyBytes, nil
 	}
 
-	engine := jsonengine.New(group.InboundRuleList)
-	result, err := io.ReadAll(engine.Process(bytes.NewReader(bodyBytes)))
+	start := time.Now()
+
+	// 记录引擎创建开始时间
+	engineCreateStart := time.Now()
+	engine, err := jsonengine.NewPathEngine(group.InboundRuleList)
+	engineCreateDuration := time.Since(engineCreateStart)
+
 	if err != nil {
+		logrus.WithError(err).WithField("group_name", group.Name).Warn("Failed to create path engine for inbound rules")
+		return bodyBytes, nil // 失败时返回原始数据
+	}
+
+	// 记录处理开始时间
+	processStart := time.Now()
+	var buf bytes.Buffer
+	if err := engine.Process(bytes.NewReader(bodyBytes), &buf); err != nil {
 		logrus.WithError(err).WithField("group_name", group.Name).Warn("Failed to apply inbound rules")
 		return bodyBytes, nil // 失败时返回原始数据
 	}
-	return result, nil
+	processDuration := time.Since(processStart)
+	totalDuration := time.Since(start)
+
+	// 详细性能日志
+	logrus.WithFields(logrus.Fields{
+		"group":                  group.Name,
+		"rule_count":             len(group.InboundRuleList),
+		"input_bytes":            len(bodyBytes),
+		"output_bytes":           buf.Len(),
+		"engine_create_ms":       engineCreateDuration.Milliseconds(),
+		"process_ms":             processDuration.Milliseconds(),
+		"total_ms":               totalDuration.Milliseconds(),
+		"engine_create_seconds":  engineCreateDuration.Seconds(),
+		"process_seconds":        processDuration.Seconds(),
+		"total_seconds":          totalDuration.Seconds(),
+	}).Debugf("Inbound PathEngine processing: create=%v, process=%v, total=%v",
+		engineCreateDuration, processDuration, totalDuration)
+
+	return buf.Bytes(), nil
 }
 
 // logUpstreamError provides a centralized way to log errors from upstream interactions.

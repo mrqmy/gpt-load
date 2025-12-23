@@ -116,8 +116,8 @@ type Group struct {
 	ProxyKeysMap      map[string]struct{}  `gorm:"-" json:"-"`
 	HeaderRuleList    []HeaderRule         `gorm:"-" json:"-"`
 	ModelRedirectMap  map[string][]ModelRedirectTarget `gorm:"-" json:"-"`
-	InboundRuleList   []jsonengine.Rule    `gorm:"-" json:"-"` // 解析后的入站规则
-	OutboundRuleList  []jsonengine.Rule    `gorm:"-" json:"-"` // 解析后的出站规则
+	InboundRuleList   []jsonengine.PathRule    `gorm:"-" json:"-"` // 解析后的入站规则（支持嵌套路径）
+	OutboundRuleList  []jsonengine.PathRule    `gorm:"-" json:"-"` // 解析后的出站规则（支持嵌套路径）
 }
 
 // APIKey 对应 api_keys 表

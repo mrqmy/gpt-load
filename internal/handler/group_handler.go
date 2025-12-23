@@ -60,8 +60,8 @@ type GroupCreateRequest struct {
 	ModelRedirectStrict bool                                  `json:"model_redirect_strict"`
 	Config              map[string]any                        `json:"config"`
 	HeaderRules         []models.HeaderRule                   `json:"header_rules"`
-	InboundRules        []jsonengine.Rule                     `json:"inbound_rules"`
-	OutboundRules       []jsonengine.Rule                     `json:"outbound_rules"`
+	InboundRules        []jsonengine.PathRule                 `json:"inbound_rules"`
+	OutboundRules       []jsonengine.PathRule                 `json:"outbound_rules"`
 	ProxyKeys           string                                `json:"proxy_keys"`
 }
 
@@ -133,8 +133,8 @@ type GroupUpdateRequest struct {
 	ModelRedirectStrict *bool                                 `json:"model_redirect_strict"`
 	Config              map[string]any                        `json:"config"`
 	HeaderRules         []models.HeaderRule                   `json:"header_rules"`
-	InboundRules        []jsonengine.Rule                     `json:"inbound_rules"`
-	OutboundRules       []jsonengine.Rule                     `json:"outbound_rules"`
+	InboundRules        []jsonengine.PathRule                 `json:"inbound_rules"`
+	OutboundRules       []jsonengine.PathRule                 `json:"outbound_rules"`
 	ProxyKeys           *string                               `json:"proxy_keys,omitempty"`
 }
 
@@ -216,11 +216,11 @@ type GroupResponse struct {
 	ParamOverrides      datatypes.JSONMap   `json:"param_overrides"`
 	ModelRedirectRules  datatypes.JSONMap   `json:"model_redirect_rules"`
 	ModelRedirectStrict bool                `json:"model_redirect_strict"`
-	Config              datatypes.JSONMap   `json:"config"`
-	HeaderRules         []models.HeaderRule `json:"header_rules"`
-	InboundRules        []jsonengine.Rule   `json:"inbound_rules"`
-	OutboundRules       []jsonengine.Rule   `json:"outbound_rules"`
-	ProxyKeys           string              `json:"proxy_keys"`
+	Config              datatypes.JSONMap       `json:"config"`
+	HeaderRules         []models.HeaderRule     `json:"header_rules"`
+	InboundRules        []jsonengine.PathRule   `json:"inbound_rules"`
+	OutboundRules       []jsonengine.PathRule   `json:"outbound_rules"`
+	ProxyKeys           string                  `json:"proxy_keys"`
 	SubGroupIds         []uint              `json:"sub_group_ids,omitempty"`
 	LastValidatedAt     *time.Time          `json:"last_validated_at"`
 	CreatedAt           time.Time           `json:"created_at"`
@@ -249,20 +249,20 @@ func (s *Server) newGroupResponse(group *models.Group) *GroupResponse {
 	}
 
 	// Parse inbound rules from JSON
-	var inboundRules []jsonengine.Rule
+	var inboundRules []jsonengine.PathRule
 	if len(group.InboundRules) > 0 {
 		if err := json.Unmarshal(group.InboundRules, &inboundRules); err != nil {
 			logrus.WithError(err).Error("Failed to unmarshal inbound rules")
-			inboundRules = make([]jsonengine.Rule, 0)
+			inboundRules = make([]jsonengine.PathRule, 0)
 		}
 	}
 
 	// Parse outbound rules from JSON
-	var outboundRules []jsonengine.Rule
+	var outboundRules []jsonengine.PathRule
 	if len(group.OutboundRules) > 0 {
 		if err := json.Unmarshal(group.OutboundRules, &outboundRules); err != nil {
 			logrus.WithError(err).Error("Failed to unmarshal outbound rules")
-			outboundRules = make([]jsonengine.Rule, 0)
+			outboundRules = make([]jsonengine.PathRule, 0)
 		}
 	}
 

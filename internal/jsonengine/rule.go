@@ -33,3 +33,26 @@ func (r Rule) IsValid() bool {
 		return false
 	}
 }
+
+// ToPathRule 转换为 PathRule（向后兼容）
+// 旧格式 Rule 的 Key 等价于顶层路径
+func (r Rule) ToPathRule() PathRule {
+	segments, _ := ParsePath(r.Key)
+	return PathRule{
+		Path:     r.Key,
+		Action:   r.Action,
+		Value:    r.Value,
+		segments: segments,
+	}
+}
+
+// ConvertRulesToPathRules 批量转换旧规则
+func ConvertRulesToPathRules(rules []Rule) []PathRule {
+	result := make([]PathRule, 0, len(rules))
+	for _, r := range rules {
+		if r.IsValid() {
+			result = append(result, r.ToPathRule())
+		}
+	}
+	return result
+}
